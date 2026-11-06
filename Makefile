@@ -617,7 +617,7 @@ LIGHTSPEED_KUTTL_DIR       ?= ${OPERATOR_BASE_DIR}/lightspeed-operator/test/kutt
 
 # OpenStack Assistant
 OPENSTACK_ASSISTANT_NAME                 ?= openstack-assistant
-OPENSTACK_ASSISTANT_IMAGE                ?= quay.io/openstack-s2i-containers/openstack-goose:master-latest
+OPENSTACK_ASSISTANT_IMAGE                ?= quay.io/dprince/openstack-goose@sha256:b4e32a10094beef4f5d1feaa706ae0d8eeef351b3659e278647b89b2605d722b
 OPENSTACK_ASSISTANT_MODEL                ?=
 OPENSTACK_ASSISTANT_CLIENT               ?= openstackclient
 OPENSTACK_ASSISTANT_PVC                  ?= ${OPENSTACK_ASSISTANT_NAME}-home

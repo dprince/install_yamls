@@ -192,14 +192,17 @@ data:
     - Use \`oc\` (OpenShift CLI) for cluster commands instead of \`kubectl\`
 
     ## Important
-    - Only use 'oc' (similar to 'kubectl') commands which *read* data. Do not edit or patch resources.
+    - Use only read-only operations: 'oc' for cluster resources and the openstack-cli MCP tool for OpenStack queries.
+    - Do not create, edit, patch, or delete resources.
 
     ## Recipes
     Custom slash commands are available. Type \`/cluster-health\` to run a cluster health check.
+    Type \`/compute-node-health\` to run a data plane (EDPM/compute node) health check.
 
     ## Context Management
     - Keep command outputs short. Use --no-headers, field selectors, and | head/tail to limit output.
-    - Summarize each command output immediately before running the next command.
+    - Retain a brief summary of each command output and continue with the remaining checks.
+    - For health recipes, present the collected findings in the final report after completing every section.
     - Do not store raw command output in memory; only retain the summary.
 EOF
 
@@ -245,6 +248,67 @@ data:
       - A \`## Summary\` section with an overall assessment (Healthy / Degraded / Critical) and brief explanation of any issues.
 
       After outputting the report, you are done. Do not run any more commands or subagents.
+  compute-node-health.yaml: |
+    version: "1.0.0"
+    title: Data Plane Health Status Check
+    description: Run a data plane (EDPM/compute node) health check using subagents for registration, services, and metrics, then output a combined markdown report
+    instructions: |
+      Complete the entire checklist in one run, without waiting for another user message.
+      Delegate all checks to exactly the three summon subagents described below.
+      Pass each subagent its checklist, tool requirements, and reporting rules.
+      Do not allow nested delegation. The parent session only combines the returned summaries.
+      Subagents must use shell for oc queries and the openstack extension's openstack-cli
+      tool (openstack__openstack-cli, argument command_str) for OpenStack queries.
+      All commands in this recipe are read-only. Each subagent must attempt every
+      check in its section. If a tool is unavailable or a command fails, record the
+      limitation and continue with the remaining checks. Never claim an unexecuted
+      check passed. Return only a concise markdown section with findings, checks
+      attempted, and limitations; do not return raw command output.
+      Only finish after all three subagents return, with the complete
+      Data Plane Health Status Report containing all three sections and a Summary.
+      Keep tool responses compact: use value output for metric discovery and JSON
+      with --noindent for service and metric queries. For filesystem space, select
+      mountpoint="/"; aggregate network counters by fqdn. Do not request large tables.
+    prompt: |
+      Run a data plane health check using three summon subagents, then immediately
+      output the final report. Do not launch any additional subagents beyond the
+      three described below.
+
+      Use summon to create these three subagents:
+
+      Subagent 1 - "Dataplane Registration": Run both commands and summarize the output before moving on:
+      - \`oc get openstackdataplanenodesets -n ${NAMESPACE} -o wide\` - note NodeSet count and any NodeSet that is not Ready.
+      - \`oc get openstackdataplanedeployments -n ${NAMESPACE} -o wide\` - note any deployment that has not Succeeded.
+      Return a markdown section titled \`## Dataplane Registration\` with findings.
+
+      Subagent 2 - "Compute Service Health": Using the openstack-cli MCP tool, run all three commands and summarize the output before moving on:
+      - \`openstack compute service list -f json --noindent\` - note any down or disabled services.
+      - \`openstack network agent list -f json --noindent\` - note any dead agents.
+      - \`openstack hypervisor list -f json --noindent\` - note hypervisor state.
+      Return a markdown section titled \`## Compute Service Health\` with findings.
+
+      Subagent 3 - "Node Metrics": Using the openstack-cli MCP tool, run metric discovery, then the available queries:
+      - \`openstack metric list -f value -c metric_name\` - discover which metric names are actually published. Do not assume metric names exist without checking this list first.
+      - For filesystem/disk free space, CPU load, memory availability, and network error counters, run \`openstack metric query '<PromQL>' -f json --noindent\` using metric names confirmed from the list above.
+      - When present, use these compact queries: \`node_filesystem_avail_bytes{mountpoint="/"}\`, \`node_load1\`, \`node_memory_MemAvailable_bytes\`, \`sum by (fqdn) (node_network_receive_errs_total)\`, and \`sum by (fqdn) (node_network_transmit_errs_total)\`. Otherwise use their closest confirmed equivalents.
+      - If metric discovery returns no results or errors (metrics storage not deployed or not registered), report node metrics as "Not available" rather than as a failure.
+      - Report any missing metric category as unavailable. Error counters are cumulative; do not describe a nonzero counter as an active error rate.
+      Return a markdown section titled \`## Node Metrics\` with findings.
+
+      Once all three subagents return their results, immediately output a final markdown report containing:
+      - \`# Data Plane Health Status Report\`
+      - A timestamp
+      - The \`## Dataplane Registration\` section from subagent 1
+      - The \`## Compute Service Health\` section from subagent 2
+      - The \`## Node Metrics\` section from subagent 3
+      - A \`## Summary\` section with an overall assessment (Healthy / Degraded / Critical) and brief explanation of any issues.
+
+      Before finishing, use the returned summaries to verify that both oc queries,
+      all three compute service queries, and metric discovery were attempted.
+      Include unavailable or failed checks in the report and qualify the overall
+      assessment when health could not be verified.
+
+      After outputting the report, you are done. Do not run any more commands or subagents.
 EOF
 
 # --- Step 7: Create Goose configuration overlay ConfigMap ---
@@ -284,6 +348,11 @@ spec:
   mcpServers:
     - name: openstack
       openstackClientRef: ${OPENSTACK_CLIENT_NAME}
+  web:
+    enabled: true
+    containerImage: quay.io/dprince/openstack-assistant-ui:latest
+    oauthproxy:
+      image: quay.io/openshift/origin-oauth-proxy@sha256:d532b6d4b9e7c1476e4dcb7f7b60427578e65c62a906ae8e939eacdec8be4517
   storage:
     pvcName: ${PVC_NAME}
   extraConfig:
